@@ -1,4 +1,4 @@
-# Logs into Azure with OIDC, fetches a secret, echos the MD5
+# Logs into Azure with OIDC, fetches the Totango api secret, runs the index.js
 # 1. OIDC docs: https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure?tabs=azure-cli%2Clinux
 #   a. create app 
 #      az ad app create --display-name oidckvApp # save "appId" value as $appId 
@@ -6,14 +6,14 @@
 #      az ad sp create --id $appId # save "id" value as $assigneeObjectId
 #   c. create role assignment
 #      az role assignment create --role "Key Vault Secrets User" \
-#        --scope "/subscriptions/4706567a-599b-4483-aee4-41926752f05b/resourceGroups/oidc-kv/providers/Microsoft.KeyVault/vaults/oidc-kv1" \
+#        --scope "/subscriptions/123-xyz/resourceGroups/oidc-kv-xyz/providers/Microsoft.KeyVault/vaults/oidc-kv1-xyz" \
 #        --assignee-object-id $assigneeObjectId --assignee-principal-type ServicePrincipal 
 #   d. set subject claim
 #     az ad app federated-credential create --id $appId --parameters '{
 #       "name": "oidckv-cred",
 #       "issuer": "https://token.actions.githubusercontent.com",
-#       "subject": "repository_owner:ideasyncratic:job_workflow_ref:ideasyncratic/oidckv/.github/workflows/oidckv.yml@refs/heads/main",
-#       "description": "Credential for ideasyncratic/oidckv workflow",
+#       "subject": "repository_owner:ORG_NAME:job_workflow_ref:/jmassardo/issues-to-totango/.github/workflows/issues-to-totango-oidc.yml@refs/heads/main",
+#       "description": "Credential for ORG_NAME/issues-to-totango workflow",
 #       "audiences": [ "api://AzureADTokenExchange" ] }'
 #   e. In the env section below, set AZURE_CLIENT_ID to the $appId and set AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID
 #
@@ -24,7 +24,8 @@
 #       types: [created]
 #   jobs:
 #     call-workflow-passing-data:
-#       uses: ideasyncratic/oidckv/.github/workflows/oidckv.yml@main
+#       uses: jmassardo/issues-to-totango/.github/workflows/issues-to-totango-oidckv.yml@main
+#       with: ...
 # 
 # 3. Set OIDC subject to include shared workflow and org
 #   # org default
@@ -33,7 +34,7 @@
 #     -H "Accept: application/vnd.github+json" \
 #     -H "Authorization: Bearer $password"\
 #     -H "X-GitHub-Api-Version: 2022-11-28" \
-#     https://api.github.com/orgs/ideasyncratic/actions/oidc/customization/sub \
+#     https://api.github.com/orgs/ORG_NAME/actions/oidc/customization/sub \
 #     -d '{"include_claim_keys":["repository_owner","job_workflow_ref"]}'
 #
 #   # update existing repos
@@ -42,41 +43,89 @@
 #     -H "Accept: application/vnd.github+json" \
 #     -H "Authorization: Bearer $password"\
 #     -H "X-GitHub-Api-Version: 2022-11-28" \
-#     https://api.github.com/repos/ideasyncratic/oidckv-user/actions/oidc/customization/sub \
+#     https://api.github.com/repos/ORG_NAME/REPO_NAME/actions/oidc/customization/sub \
 #     -d '{"use_default":false,"include_claim_keys":["repository_owner","job_workflow_ref"]}' 
 #
 #   produces a subject claim like:
-#    subject claim - repository_owner:ideasyncratic:job_workflow_ref:ideasyncratic/oidckv/.github/workflows/oidckv.yml@refs/heads/main
+#    subject claim - repository_owner:ORG_NAME:job_workflow_ref:jmassardo/issues-to-totango/.github/workflows/issues-to-totango-oidckv.yml@refs/heads/main
 # 
 
-name: Login with OIDC, fetch a key vault secret, echo the MD5
+name: 'Issues to Totango'
 
 on:
   workflow_call:
-
-env:
-  AZURE_CLIENT_ID: "9d04cac8-55ab-49e7-88c0-785e0f34f9c0"
-  AZURE_TENANT_ID: "cfeeb63b-ccfc-439f-a359-4cdc09697570"
-  AZURE_SUBSCRIPTION_ID: "4706567a-599b-4483-aee4-41926752f05b"
+    inputs:
+      ACCOUNT_ID:
+        description: 'Customer account id'
+        required: true
+        type: "string"
+      ACTIVITY_TYPE:
+        description: 'Type from the `Success Flow` section'
+        required: true
+        type: "string"
+      TOUCHPOINT_TYPE:
+        description: 'The id value of the touchpoint type.'
+        required: true
+        type: "string"
+      TOUCHPOINT_TAGS:
+        description: 'The id value of the touchpoint reason.'
+        required: true
+        type: "string"
+      TASK_ASSIGNEE:
+        description: 'The email value used for testing - will be changed later after testing'
+        type: "string"
+      GITHUB_TOKEN:
+        description: 'GitHub Repo Token for auth'
+        type: "string"
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure subscription id.'
+        required: true
+        type: "string"
+      AZURE_TENANT_ID:
+        description: 'Azure AD tenant ID'
+        required: true
+        type: "string"
+      AZURE_CLIENT_ID:
+        description: 'Azure app client id'
+        required: true
+        type: "string"
+      AZURE_VAULT_NAME:
+        description: 'Azure key vault name e.g. "totangokv1"'
+        required: true
+        type: "string"
+      AZURE_KEY_NAME:
+        description: 'Azure key vault secret name e.g. "totango-api-key". Will be saved to the environment as "APP_TOKEN"'
+        required: true
+        type: "string"
 
 jobs:
-  echoMd5:
+  process-issue:
     permissions:
+      issues: write
       id-token: write
     runs-on: ubuntu-latest
     steps:
-    - name: Azure login
-      uses: azure/login@v1
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
       with:
-        client-id: ${{ env.AZURE_CLIENT_ID }}
-        tenant-id: ${{ env.AZURE_TENANT_ID }}
-        subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-    - name: Get api-key secret
+        node-version: 18
+    - uses: azure/login@v1
+      with:
+        client-id: ${{ inputs.AZURE_CLIENT_ID }}
+        tenant-id: ${{ inputs.AZURE_TENANT_ID }}
+        subscription-id: ${{ inputs.AZURE_SUBSCRIPTION_ID }}
+    - name: Get APP_TOKEN secret
       run: |
-        secret=$(az keyvault secret show --name api-key --vault-name oidc-kv1 --query value --output tsv)
+        secret=$(az keyvault secret show --name ${{ inputs.AZURE_KEY_NAME }} --vault-name ${{ inputs.AZURE_VAULT_NAME }} --query value --output tsv)
         echo "::add-mask::$secret"
-        echo "api_key=$secret" >> "$GITHUB_ENV"
-    - name: Echo md5 of secret
+        echo "APP_TOKEN=$secret" >> "$GITHUB_ENV"
+    - name: Set env vars from input
       run: |
-        echo "raw redacted: $api_key"
-        echo "$api_key" | md5sum
+        echo "ACCOUNT_ID=$INPUTS_ACCOUNT_ID" >> "$GITHUB_ENV"
+        echo "ACTIVITY_TYPE=$INPUTS_ACTIVITY_TYPE" >> "$GITHUB_ENV"
+        echo "TOUCHPOINT_TYPE=$INPUTS_TOUCHPOINT_TYPE" >> "$GITHUB_ENV"
+        echo "TOUCHPOINT_TAGS=$INPUTS_TOUCHPOINT_TAGS" >> "$GITHUB_ENV"
+        echo "TASK_ASSIGNEE=$INPUTS_TASK_ASSIGNEE" >> "$GITHUB_ENV"
+        echo "GITHUB_TOKEN=$INPUTS_GITHUB_TOKEN" >> "$GITHUB_ENV"
+    - name: run issues-to-totango
+      run: node -e 'console.log(require("crypto").createHash("md5").update(process.env.APP_TOKEN).digest("hex"))'
