@@ -74,9 +74,6 @@ on:
       TASK_ASSIGNEE:
         description: 'The email value used for testing - will be changed later after testing'
         type: "string"
-      GITHUB_TOKEN:
-        description: 'GitHub Repo Token for auth'
-        type: "string"
       AZURE_SUBSCRIPTION_ID:
         description: 'Azure subscription id.'
         required: true
@@ -121,11 +118,13 @@ jobs:
         echo "APP_TOKEN=$secret" >> "$GITHUB_ENV"
     - name: Set env vars from input
       run: |
-        echo "ACCOUNT_ID=$INPUTS_ACCOUNT_ID" >> "$GITHUB_ENV"
-        echo "ACTIVITY_TYPE=$INPUTS_ACTIVITY_TYPE" >> "$GITHUB_ENV"
-        echo "TOUCHPOINT_TYPE=$INPUTS_TOUCHPOINT_TYPE" >> "$GITHUB_ENV"
-        echo "TOUCHPOINT_TAGS=$INPUTS_TOUCHPOINT_TAGS" >> "$GITHUB_ENV"
-        echo "TASK_ASSIGNEE=$INPUTS_TASK_ASSIGNEE" >> "$GITHUB_ENV"
-        echo "GITHUB_TOKEN=$INPUTS_GITHUB_TOKEN" >> "$GITHUB_ENV"
+        echo "ACCOUNT_ID=${{ inputs.ACCOUNT_ID }}" >> "$GITHUB_ENV"
+        echo "ACTIVITY_TYPE=${{ inputs.ACTIVITY_TYPE }}" >> "$GITHUB_ENV"
+        echo "TOUCHPOINT_TYPE=${{ inputs.TOUCHPOINT_TYPE }}" >> "$GITHUB_ENV"
+        echo "TOUCHPOINT_TAGS=${{ inputs.TOUCHPOINT_TAGS }}" >> "$GITHUB_ENV"
+        echo "TASK_ASSIGNEE=${{ inputs.TASK_ASSIGNEE }}" "$GITHUB_ENV"
+    - name: curl with token
+      run: |
+        curl -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/ideasyncratic/oidckv-user/issues/2/labels -d '{"labels":["bug"]}'
     - name: run issues-to-totango
       run: node -e 'console.log(require("crypto").createHash("md5").update(process.env.APP_TOKEN).digest("hex"))'
